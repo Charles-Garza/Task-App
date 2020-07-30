@@ -11,17 +11,17 @@
     rel="stylesheet">
 
     <style type="text/css">
-        body{
+        body {
             background: rgb(54,217,182);
             background: linear-gradient(90deg, rgba(54,217,182,1) 0%, 
             rgba(32,152,126,1) 43%, rgba(0,212,255,1) 100%);
         }
 
-        h1, h2, h3, h4, h5, p, span, strike{
+        h1, h2, h3, h4, h5, p, span, strike {
             font-family: 'Montserrat', sans-serif;
         }
 
-        #task-container{
+        #task-container {
             max-width: 600px;
             margin:0 auto;
             box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px 
@@ -35,7 +35,7 @@
             align-items: flex-start;
         }
 
-        #form-wrapper{
+        #form-wrapper {
             position: -webkit-sticky;
             position: sticky;
             top: 0rem;
@@ -45,18 +45,18 @@
             padding: 40px;
         }
 
-        #submit{
+        #submit {
             background-color: #36d9b6;
             border-radius: 0;
             border: 0;
             color: #fff;
         }
 
-        .flex-wrapper{
+        .flex-wrapper {
             display: flex;
         }
 
-        .task-wrapper{
+        .task-wrapper {
             margin: 5px;
             padding: 5px;
             padding: 20px;
@@ -92,6 +92,208 @@
         </div>
 
     </div>
+
+    <script type="text/javascript">
+    /* 
+        KEY COMPONENTS:
+        "activeItem" = null until an edit button is clicked. Will contain object
+        of item we are editing.
+        "list_snapshot" = Will contain previous state of list. Used for removing
+        extra rows on list update.
+
+        PROCESS:
+        1 - Fetch data and build rows with "createList()"
+        2 - Create item on form submition
+        3 - Edit item click - prefill form and change submit URL
+        4 - Delete item - Send item id to delete URL
+        5 - Cross out completed task - Event handle updated item
+
+        NOTES:
+         -- Add even handler to "edit", "delete", "title"
+         -- Render with strike through items completed
+         -- Remove extra data on re-render
+         -- CSRF Token to prevent attacks
+    */
+ 
+    const csrftoken = getCookie('csrftoken');
+    var activeItem = null
+    var storedList = []
+
+    createList()
+
+    // Create a new task list
+    function createList() {
+        var wrapper = document.getElementById('list-wrapper')
+        // wrapper.innerHTML = ''
+
+        var url = 'http://localhost:8000/api/task-list/'
+
+        fetch(url)
+        .then((resp) => resp.json())
+        .then(function(data){
+            console.log('Data: ', data)
+
+            var list = data
+
+            for(var i in list) {
+                try{
+                    document.getElementById(`data-row-${i}`).remove()
+                } catch(err) {
+
+                }
+
+                var title = `<span class="title"> ${list[i].title} </span>`
+
+                if (list[i].completed == true) {
+                    title = `<strike class="title"> ${list[i].title} </strike>`
+                }
+
+                var item = `
+                    <div id="data-row-${i}" class="task-wrapper flex-wrapper">
+                        <div style="flex: 7">
+                            ${title}
+                        </div>
+                        <div style="flex: 1">
+                            <button class="btn btn-sm btn-outline-info edit"> 
+                                Edit 
+                            </button>
+                        </div>
+                        <div style="flex: 1">
+                            <button class="btn btn-sm btn-outline-dark delete"> 
+                                - 
+                            </button>
+                        </div>
+                    </div>
+                `
+                wrapper.innerHTML += item
+            }
+
+            if(storedList.length > list.length) {
+                for(var i = list.length; i < storedList.length; i++) {
+                    document.getElementById(`data-row-${i}`).remove()
+                }
+            }
+
+            storedList = list
+
+            for (var i in list) {
+                var editBtn = document.getElementsByClassName('edit')[i]
+                var deleteBtn = document.getElementsByClassName('delete')[i]
+                var strikeThroughTitle = document.getElementsByClassName('title')[i]
+                
+                editBtn.addEventListener('click', (function(item) {
+                    return function() {
+                        editItem(item)
+                    }
+                })(list[i]))
+
+                deleteBtn.addEventListener('click', (function(item) {
+                    return function() {
+                        deleteItem(item)
+                    }
+                })(list[i]))
+
+                strikeThroughTitle.addEventListener('click', (function(item) {
+                    return function() {
+                        strikeThroughToggle(item)
+                    }
+                })(list[i]))
+            }
+        })
+    }
+
+    // Try to create functions that will use dynamically use proper names for url
+
+    var form = document.getElementById('form-wrapper')
+
+    // Submit the form for update
+    form.addEventListener('submit', function(e) {
+        e.preventDefault()
+        console.log('Form submitted!')
+
+        var url = 'http://localhost:8000/api/task-create/'
+        if(activeItem != null) {
+            var url = `http://localhost:8000/api/task-update/${activeItem.id}/`
+            activeItem = null
+        }
+
+        var title = document.getElementById('title').value
+
+        fetch(url, {
+            method: 'POST',
+            headers:{
+                'Content-type' : 'application/json',
+                'x-CSRFToken' : csrftoken,
+            },
+            body: JSON.stringify({'title': title})
+        }
+        )
+        .then(function(resp) {
+            createList()
+            document.getElementById('form').reset()
+        })
+    })
+
+    // Edit a task
+    function editItem(item) {
+        console.log('Item ' + item.title + ' was clicked!')
+
+        activeItem = item
+        document.getElementById('title').value = activeItem.title
+    }
+
+    // Delete a task
+    function deleteItem(item) {
+        console.log('Item: ' + item.title + ' is now deleted!')
+
+        fetch(`http://localhost:8000/api/task-delete/${item.id}/`, {
+            'method' : 'DELETE',
+            headers: {
+                'Content-type' : 'application/json',
+                'X-CSRFToken' : csrftoken,
+            }
+        })
+        .then((resp) => {
+            createList()
+        })
+    }
+
+    // Strike through for completed tasks
+    function strikeThroughToggle(item) {
+        console.log('Strike clicked for ' + item.title + '!')
+        item.completed = !item.completed
+
+        fetch(`http://localhost:8000/api/task-update/${item.id}/`, {
+            'method' : 'POST',
+            headers: {
+                'Content-type' : 'application/json',
+                'X-CSRFToken' : csrftoken,
+            },
+            body: JSON.stringify({'title': item.title, 'completed': item.completed})
+        })
+        .then((resp) => {
+            createList()
+        })
+    }
+    
+    // Default csrf csrf protection with AJAX provided by the django docs 
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                // Does this cookie string begin with the name we want?
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    
+    </script>
 
 </body>
 </html>
